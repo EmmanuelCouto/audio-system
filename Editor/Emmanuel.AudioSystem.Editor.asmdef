@@ -1,0 +1,18 @@
+{
+    "name": "Emmanuel.AudioSystem.Editor",
+    "rootNamespace": "Emmanuel.AudioSystem.Editor",
+    "references": [
+        "Emmanuel.AudioSystem"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

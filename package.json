@@ -1,0 +1,22 @@
+{
+  "name": "com.emmanuel.audio-system",
+  "version": "1.0.0",
+  "displayName": "Audio System",
+  "description": "A lightweight, asset-driven audio system for Unity with mixer categories, pooled playback, instance policies, fades, spatial audio and editor tooling.",
+  "unity": "6000.0",
+  "author": {
+    "name": "Emmanuel Couto",
+    "url": "https://github.com/EmmanuelCouto"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EmmanuelCouto/audio-system.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "audio",
+    "mixer",
+    "sound",
+    "unity"
+  ]
+}

@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a29b8779617a40aba24d28ef6c7761df, type: 3}
+  m_Name: AudioSystemSettings
+  m_EditorClassIdentifier: Emmanuel.AudioSystem::Emmanuel.AudioSystem.AudioSystemSettings
+  mainMixer: {fileID: 24100000, guid: 69be4fd54c05ab84bbe796bd58c9d74c, type: 2}
+  defaultMixer: {fileID: 24100000, guid: 69be4fd54c05ab84bbe796bd58c9d74c, type: 2}
+  isPackageDefault: 1
+  initialVoiceCount: 8
+  maxVoiceCount: 24
+  defaultIcon: {fileID: 2800000, guid: ea8e26f062be3a94c8c75d5c694a9286, type: 3}
+  categories:
+  - name: Master
+    mixerGroup: {fileID: 24300002, guid: 69be4fd54c05ab84bbe796bd58c9d74c, type: 2}
+    icon: {fileID: 2800000, guid: 4bd7bbeb8a552074ba28975497763382, type: 3}
+  - name: Music
+    mixerGroup: {fileID: 5797167566817481488, guid: 69be4fd54c05ab84bbe796bd58c9d74c, type: 2}
+    icon: {fileID: 2800000, guid: a4d2dcbb1cb5c8443bac30124091cfaf, type: 3}
+  - name: SFX
+    mixerGroup: {fileID: -3671292686599003688, guid: 69be4fd54c05ab84bbe796bd58c9d74c, type: 2}
+    icon: {fileID: 2800000, guid: cabd98b64026eaa49abbc58606584b97, type: 3}
+  - name: UI
+    mixerGroup: {fileID: -2717026760818053886, guid: 69be4fd54c05ab84bbe796bd58c9d74c, type: 2}
+    icon: {fileID: 2800000, guid: a06fabbc64d2b294299b6e303a4b9b0d, type: 3}
+  - name: Ambient
+    mixerGroup: {fileID: 5165834980007422195, guid: 69be4fd54c05ab84bbe796bd58c9d74c, type: 2}
+    icon: {fileID: 2800000, guid: a8f66fce515d7b641a2ba9021eba398b, type: 3}
+  - name: Voice
+    mixerGroup: {fileID: 1892149787011672011, guid: 69be4fd54c05ab84bbe796bd58c9d74c, type: 2}
+    icon: {fileID: 2800000, guid: a8f9efdad2f9089409bce1101f50a5e7, type: 3}
