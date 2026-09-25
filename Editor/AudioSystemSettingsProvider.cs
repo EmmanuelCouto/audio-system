@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
@@ -12,10 +13,18 @@ internal static class AudioSystemSettingsProvider
 {
     private const string DefaultSettingsGuid =
         "2ee1aa5ae6a74511ad9fda7afafef466";
-    private const string ProjectSettingsFolder =
+    private const string DefaultMixerGuid =
+        "69be4fd54c05ab84bbe796bd58c9d74c";
+    private const string ProjectRootSettingsFolder =
         "Assets/Settings";
+    private const string ProjectSettingsFolder =
+        ProjectRootSettingsFolder + "/AudioSystem";
+    private const string LegacyProjectSettingsPath =
+        ProjectRootSettingsFolder + "/AudioSystemSettings.asset";
     private const string ProjectSettingsPath =
         ProjectSettingsFolder + "/AudioSystemSettings.asset";
+    private const string ProjectMixerPath =
+        ProjectSettingsFolder + "/Main.mixer";
     private const string Description =
         "Configure the AudioMixer used by the Audio System. Assign the default " +
         "mixer or replace it with a project-specific one.";
@@ -29,7 +38,13 @@ internal static class AudioSystemSettingsProvider
 
     static AudioSystemSettingsProvider()
     {
-        EditorApplication.delayCall += EnsureSettingsIsPreloaded;
+        EditorApplication.delayCall += InitializeProjectSettings;
+    }
+
+    private static void InitializeProjectSettings()
+    {
+        EnsureSettingsIsPreloaded();
+        HidePackageDefaultMixer();
     }
 
     [SettingsProvider]
@@ -63,15 +78,26 @@ internal static class AudioSystemSettingsProvider
 
         serializedSettings.Update();
         var mainMixerProperty = serializedSettings.FindProperty("mainMixer");
+        var categoriesProperty = serializedSettings.FindProperty("categories");
+        var previousMixer = mainMixerProperty.objectReferenceValue as AudioMixer;
 
         EditorGUILayout.Space(6);
         EditorGUILayout.LabelField("Set Main Audio Mixer", EditorStyles.boldLabel);
         EditorGUILayout.LabelField(Description, EditorStyles.wordWrappedLabel);
+        EditorGUI.BeginChangeCheck();
         EditorGUILayout.PropertyField(
             mainMixerProperty,
             new GUIContent(
                 "Main Audio Mixer",
                 "AudioMixer used by the Audio System at runtime."));
+        if (EditorGUI.EndChangeCheck())
+        {
+            var newMixer = mainMixerProperty.objectReferenceValue as AudioMixer;
+            AutoAssignCategoryGroups(
+                categoriesProperty,
+                previousMixer,
+                newMixer);
+        }
 
         DrawPlaybackSettings();
         DrawCategories(mainMixerProperty);
@@ -309,15 +335,22 @@ internal static class AudioSystemSettingsProvider
     {
         serializedSettings.Update();
         var mainMixerProperty = serializedSettings.FindProperty("mainMixer");
+        var categoriesProperty = serializedSettings.FindProperty("categories");
+        var previousMixer =
+            mainMixerProperty.objectReferenceValue as AudioMixer;
         var defaultMixer = serializedSettings
             .FindProperty("defaultMixer")
-            .objectReferenceValue;
+            .objectReferenceValue as AudioMixer;
 
         if (defaultMixer == null)
             return;
 
         Undo.SetCurrentGroupName("Restore Default Audio Mixer");
         mainMixerProperty.objectReferenceValue = defaultMixer;
+        AutoAssignCategoryGroups(
+            categoriesProperty,
+            previousMixer,
+            defaultMixer);
         serializedSettings.ApplyModifiedProperties();
         EditorUtility.SetDirty(settings);
     }
@@ -354,6 +387,28 @@ internal static class AudioSystemSettingsProvider
         if (settingsAtDefaultLocation != null)
             return PrepareProjectSettings(settingsAtDefaultLocation);
 
+        var legacySettings =
+            AssetDatabase.LoadAssetAtPath<AudioSystemSettings>(
+                LegacyProjectSettingsPath);
+        if (legacySettings != null)
+        {
+            EnsureProjectFolders();
+            var moveError = AssetDatabase.MoveAsset(
+                LegacyProjectSettingsPath,
+                ProjectSettingsPath);
+            if (string.IsNullOrEmpty(moveError))
+            {
+                return PrepareProjectSettings(
+                    AssetDatabase.LoadAssetAtPath<AudioSystemSettings>(
+                        ProjectSettingsPath));
+            }
+
+            Debug.LogWarning(
+                $"Audio System could not move its settings asset to " +
+                $"'{ProjectSettingsPath}': {moveError}");
+            return PrepareProjectSettings(legacySettings);
+        }
+
         foreach (var guid in AssetDatabase.FindAssets("t:AudioSystemSettings"))
         {
             if (guid == DefaultSettingsGuid)
@@ -382,8 +437,7 @@ internal static class AudioSystemSettingsProvider
         if (defaultSettings == null)
             return null;
 
-        if (!AssetDatabase.IsValidFolder(ProjectSettingsFolder))
-            AssetDatabase.CreateFolder("Assets", "Settings");
+        EnsureProjectFolders();
 
         if (!AssetDatabase.CopyAsset(
                 defaultSettingsPath,
@@ -408,14 +462,292 @@ internal static class AudioSystemSettingsProvider
         var serializedProjectSettings = new SerializedObject(projectSettings);
         var packageDefaultProperty =
             serializedProjectSettings.FindProperty("isPackageDefault");
-        if (packageDefaultProperty == null || !packageDefaultProperty.boolValue)
-            return projectSettings;
+        var mainMixerProperty =
+            serializedProjectSettings.FindProperty("mainMixer");
+        var defaultMixerProperty =
+            serializedProjectSettings.FindProperty("defaultMixer");
+        var categoriesProperty =
+            serializedProjectSettings.FindProperty("categories");
+        var wasPackageDefault =
+            packageDefaultProperty != null && packageDefaultProperty.boolValue;
+        var currentMixer =
+            mainMixerProperty?.objectReferenceValue as AudioMixer;
+        var currentDefaultMixer =
+            defaultMixerProperty?.objectReferenceValue as AudioMixer;
+        var packageMixer = IsPackageAsset(currentMixer)
+            ? currentMixer
+            : IsPackageAsset(currentDefaultMixer)
+                ? currentDefaultMixer
+                : null;
+        var editableDefaultMixer = EnsureEditableDefaultMixer();
+        var changed = false;
 
-        packageDefaultProperty.boolValue = false;
-        serializedProjectSettings.ApplyModifiedPropertiesWithoutUndo();
-        EditorUtility.SetDirty(projectSettings);
-        AssetDatabase.SaveAssetIfDirty(projectSettings);
+        if (packageDefaultProperty != null && packageDefaultProperty.boolValue)
+        {
+            packageDefaultProperty.boolValue = false;
+            changed = true;
+        }
+
+        if (editableDefaultMixer != null)
+        {
+            if (wasPackageDefault || IsPackageAsset(currentMixer))
+            {
+                mainMixerProperty.objectReferenceValue = editableDefaultMixer;
+                changed = true;
+            }
+
+            if (defaultMixerProperty != null &&
+                (currentDefaultMixer == null ||
+                 IsPackageAsset(currentDefaultMixer)))
+            {
+                defaultMixerProperty.objectReferenceValue = editableDefaultMixer;
+                changed = true;
+            }
+
+            if (packageMixer != null)
+            {
+                changed |= RemapCategoryGroups(
+                    categoriesProperty,
+                    packageMixer,
+                    editableDefaultMixer);
+                RemapAudioAssets(packageMixer, editableDefaultMixer);
+            }
+        }
+
+        if (changed)
+        {
+            serializedProjectSettings.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(projectSettings);
+            AssetDatabase.SaveAssetIfDirty(projectSettings);
+        }
+
         return projectSettings;
+    }
+
+    private static AudioMixer EnsureEditableDefaultMixer()
+    {
+        var existingMixer =
+            AssetDatabase.LoadAssetAtPath<AudioMixer>(ProjectMixerPath);
+        if (existingMixer != null)
+            return existingMixer;
+
+        EnsureProjectFolders();
+
+        if (AssetDatabase.LoadMainAssetAtPath(ProjectMixerPath) != null)
+        {
+            Debug.LogError(
+                $"Audio System could not create its editable mixer because " +
+                $"'{ProjectMixerPath}' is already used by another asset.");
+            return null;
+        }
+
+        var templatePath = AssetDatabase.GUIDToAssetPath(DefaultMixerGuid);
+        if (string.IsNullOrEmpty(templatePath) ||
+            AssetDatabase.LoadAssetAtPath<AudioMixer>(templatePath) == null)
+        {
+            Debug.LogError("Audio System default mixer template was not found.");
+            return null;
+        }
+
+        if (!AssetDatabase.CopyAsset(templatePath, ProjectMixerPath))
+        {
+            Debug.LogError(
+                $"Audio System could not create '{ProjectMixerPath}'.");
+            return null;
+        }
+
+        AssetDatabase.ImportAsset(ProjectMixerPath);
+        return AssetDatabase.LoadAssetAtPath<AudioMixer>(ProjectMixerPath);
+    }
+
+    private static void EnsureFolder(string path, string folderName)
+    {
+        if (AssetDatabase.IsValidFolder(path))
+            return;
+
+        var parentPath = path.Substring(0, path.LastIndexOf('/'));
+        AssetDatabase.CreateFolder(parentPath, folderName);
+    }
+
+    private static void EnsureProjectFolders()
+    {
+        EnsureFolder(ProjectRootSettingsFolder, "Settings");
+        EnsureFolder(ProjectSettingsFolder, "AudioSystem");
+    }
+
+    private static void AutoAssignCategoryGroups(
+        SerializedProperty categoriesProperty,
+        AudioMixer previousMixer,
+        AudioMixer newMixer)
+    {
+        if (categoriesProperty == null || newMixer == null ||
+            newMixer == previousMixer)
+        {
+            return;
+        }
+
+        var availableGroups = newMixer
+            .FindMatchingGroups(string.Empty)
+            .ToList();
+        var usedGroups = new HashSet<AudioMixerGroup>();
+
+        for (var index = 0; index < categoriesProperty.arraySize; index++)
+        {
+            var categoryProperty =
+                categoriesProperty.GetArrayElementAtIndex(index);
+            var categoryName = categoryProperty
+                .FindPropertyRelative("name")
+                .stringValue;
+            var groupProperty =
+                categoryProperty.FindPropertyRelative("mixerGroup");
+            var previousGroup =
+                groupProperty.objectReferenceValue as AudioMixerGroup;
+            var replacement = FindAvailableGroupByName(
+                availableGroups,
+                usedGroups,
+                categoryName);
+
+            if (replacement == null && previousGroup != null)
+            {
+                replacement = FindAvailableGroupByName(
+                    availableGroups,
+                    usedGroups,
+                    previousGroup.name);
+            }
+
+            if (replacement == null)
+                continue;
+
+            groupProperty.objectReferenceValue = replacement;
+            usedGroups.Add(replacement);
+        }
+    }
+
+    private static AudioMixerGroup FindAvailableGroupByName(
+        IEnumerable<AudioMixerGroup> groups,
+        ISet<AudioMixerGroup> usedGroups,
+        string expectedName)
+    {
+        if (string.IsNullOrWhiteSpace(expectedName))
+            return null;
+
+        return groups.FirstOrDefault(group =>
+            !usedGroups.Contains(group) &&
+            string.Equals(
+                group.name,
+                expectedName,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool RemapCategoryGroups(
+        SerializedProperty categoriesProperty,
+        AudioMixer sourceMixer,
+        AudioMixer destinationMixer)
+    {
+        if (categoriesProperty == null)
+            return false;
+
+        var changed = false;
+        for (var index = 0; index < categoriesProperty.arraySize; index++)
+        {
+            var groupProperty = categoriesProperty
+                .GetArrayElementAtIndex(index)
+                .FindPropertyRelative("mixerGroup");
+            var sourceGroup =
+                groupProperty.objectReferenceValue as AudioMixerGroup;
+            if (sourceGroup == null || sourceGroup.audioMixer != sourceMixer)
+                continue;
+
+            var destinationGroup = FindEquivalentGroup(
+                sourceGroup,
+                destinationMixer);
+            if (destinationGroup == null)
+                continue;
+
+            groupProperty.objectReferenceValue = destinationGroup;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static void RemapAudioAssets(
+        AudioMixer sourceMixer,
+        AudioMixer destinationMixer)
+    {
+        foreach (var guid in AssetDatabase.FindAssets("t:Audio"))
+        {
+            var path = AssetDatabase.GUIDToAssetPath(guid);
+            if (!path.StartsWith("Assets/"))
+                continue;
+
+            var audio = AssetDatabase.LoadAssetAtPath<Audio>(path);
+            if (audio == null || audio.mixerGroup == null ||
+                audio.mixerGroup.audioMixer != sourceMixer)
+            {
+                continue;
+            }
+
+            var destinationGroup = FindEquivalentGroup(
+                audio.mixerGroup,
+                destinationMixer);
+            if (destinationGroup == null)
+                continue;
+
+            var serializedAudio = new SerializedObject(audio);
+            serializedAudio.FindProperty("mixerGroup").objectReferenceValue =
+                destinationGroup;
+            serializedAudio.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(audio);
+            AssetDatabase.SaveAssetIfDirty(audio);
+        }
+    }
+
+    private static AudioMixerGroup FindEquivalentGroup(
+        AudioMixerGroup sourceGroup,
+        AudioMixer destinationMixer)
+    {
+        AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+            sourceGroup,
+            out _,
+            out long sourceLocalId);
+
+        var groups = destinationMixer.FindMatchingGroups(string.Empty);
+        foreach (var group in groups)
+        {
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                group,
+                out _,
+                out long destinationLocalId);
+            if (sourceLocalId != 0 && destinationLocalId == sourceLocalId)
+                return group;
+        }
+
+        return groups.FirstOrDefault(group => group.name == sourceGroup.name);
+    }
+
+    private static bool IsPackageAsset(UnityEngine.Object asset)
+    {
+        if (asset == null)
+            return false;
+
+        var path = AssetDatabase.GetAssetPath(asset);
+        return path.StartsWith("Packages/");
+    }
+
+    private static void HidePackageDefaultMixer()
+    {
+        var templatePath = AssetDatabase.GUIDToAssetPath(DefaultMixerGuid);
+        var mixer = AssetDatabase.LoadAssetAtPath<AudioMixer>(templatePath);
+        if (mixer == null)
+            return;
+
+        mixer.hideFlags |= HideFlags.HideInHierarchy | HideFlags.NotEditable;
+        foreach (var group in mixer.FindMatchingGroups(string.Empty))
+        {
+            group.hideFlags |=
+                HideFlags.HideInHierarchy | HideFlags.NotEditable;
+        }
     }
 
     private static void AddToPreloadedAssets(AudioSystemSettings audioSettings)

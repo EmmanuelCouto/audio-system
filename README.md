@@ -27,8 +27,13 @@ This URL assumes the dedicated repository contains `package.json` at its root.
    `AudioClip` assets.
 
 The package stores editable project settings at
-`Assets/Settings/AudioSystemSettings.asset`. Package defaults remain inside
-the package and are not modified.
+`Assets/Settings/AudioSystem/AudioSystemSettings.asset`. Package defaults
+remain inside the package and are not modified.
+
+The default mixer is copied to
+`Assets/Settings/AudioSystem/Main.mixer`, where its groups and effects can be
+edited normally. The mixer stored in the package is only a creation and
+migration template.
 
 ## Basic usage
 
@@ -72,3 +77,11 @@ AudioHandle handle = movementAudio.PlayTracked(
 ## License
 
 This package is available under the MIT License. See [LICENSE.md](LICENSE.md).
+
+## Versioning
+
+- Patch versions, such as `1.0.1`, contain bug fixes and small corrections.
+- Minor versions, such as `1.1.0`, contain completed features or larger
+  functional increments.
+- Major versions are reserved for intentionally incompatible public API or
+  serialization changes.
