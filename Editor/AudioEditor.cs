@@ -37,6 +37,7 @@ internal sealed class AudioEditor : UnityEditor.Editor
     private GUIContent headerDropdownIcon;
     private GUIStyle headerButtonHoverStyle;
     private AudioClipListGUI clipListGUI;
+    private AudioSystemSettings audioSettings;
     private bool spatialSettingsExpanded;
 
     static AudioEditor()
@@ -293,10 +294,11 @@ internal sealed class AudioEditor : UnityEditor.Editor
         EditorGUI.EndProperty();
     }
 
-    private static void DrawMixerGroupDropdown(
+    private void DrawMixerGroupDropdown(
         SerializedProperty mixerGroupProperty)
     {
-        var settings = AudioSystemSettingsProvider.FindSettings();
+        var settings = audioSettings ??=
+            AudioSystemSettingsProvider.FindSettings();
         var mainMixer = settings != null ? settings.MainMixer : null;
 
         AudioMixerGroupDropdownGUI.Draw(
@@ -322,6 +324,7 @@ internal sealed class AudioEditor : UnityEditor.Editor
     private void OnEnable()
     {
         clipListGUI = new AudioClipListGUI(Repaint);
+        audioSettings = AudioSystemSettingsProvider.FindSettings();
         spatialSettingsExpanded = EditorPrefs.GetBool(
             SpatialSettingsPreferenceKey,
             false);
@@ -417,14 +420,10 @@ internal sealed class AudioEditor : UnityEditor.Editor
 
         serializedObject.UpdateIfRequiredOrScript();
         var colorProperty = serializedObject.FindProperty("iconColor");
-        var color = colorProperty != null &&
-                    !colorProperty.hasMultipleDifferentValues
-            ? colorProperty.colorValue
-            : Color.white;
-        HeaderIconButtonContent.tooltip = colorProperty != null &&
-                                          colorProperty.hasMultipleDifferentValues
-            ? "Choose the icon color for the selected Audio assets."
-            : $"Icon Color: {ToHex(color)}";
+        var mixerGroupProperty = serializedObject.FindProperty("mixerGroup");
+        HeaderIconButtonContent.tooltip = BuildHeaderButtonTooltip(
+            mixerGroupProperty,
+            colorProperty);
 
         var isHovering = buttonPosition.Contains(Event.current.mousePosition);
         DrawHeaderButtonHover(buttonPosition, isHovering);
@@ -517,9 +516,61 @@ internal sealed class AudioEditor : UnityEditor.Editor
     private static string ToHex(Color color)
     {
         var color32 = (Color32)color;
-        return color32.a == byte.MaxValue
-            ? $"#{color32.r:X2}{color32.g:X2}{color32.b:X2}"
-            : $"#{color32.r:X2}{color32.g:X2}{color32.b:X2}{color32.a:X2}";
+        return $"#{color32.r:X2}{color32.g:X2}{color32.b:X2}";
+    }
+
+    private string BuildHeaderButtonTooltip(
+        SerializedProperty mixerGroupProperty,
+        SerializedProperty colorProperty)
+    {
+        var categoryName = "Multiple Values";
+        var outputName = "Multiple Values";
+        if (mixerGroupProperty != null &&
+            !mixerGroupProperty.hasMultipleDifferentValues)
+        {
+            var settings = audioSettings ??=
+                AudioSystemSettingsProvider.FindSettings();
+            var mixerGroup = mixerGroupProperty.objectReferenceValue as
+                UnityEngine.Audio.AudioMixerGroup;
+
+            if (mixerGroup == null)
+            {
+                categoryName = "Main / Root";
+                outputName = settings?.MainMixer != null
+                    ? $"{settings.MainMixer.name}/Root"
+                    : "Main / Root";
+            }
+            else
+            {
+                var isInvalid = settings != null &&
+                                mixerGroup.audioMixer != settings.MainMixer;
+                categoryName = isInvalid ? "Invalid" : "Uncategorized";
+                if (!isInvalid && settings != null)
+                {
+                    foreach (var category in settings.Categories)
+                    {
+                        if (category.MixerGroup != mixerGroup)
+                            continue;
+
+                        categoryName = string.IsNullOrWhiteSpace(category.Name)
+                            ? "Unnamed"
+                            : category.Name;
+                        break;
+                    }
+                }
+
+                outputName =
+                    $"{mixerGroup.audioMixer.name}/{mixerGroup.name}";
+            }
+        }
+
+        var colorName = colorProperty == null ||
+                        colorProperty.hasMultipleDifferentValues
+            ? "Multiple Values"
+            : ToHex(colorProperty.colorValue);
+        return $"Category: {categoryName}\n" +
+               $"Output: {outputName}\n" +
+               $"Icon Color: {colorName}";
     }
 
     private void DrawHeaderDropdownIndicator(Rect buttonPosition)
@@ -567,6 +618,7 @@ internal sealed class AudioEditor : UnityEditor.Editor
         int width,
         int height)
     {
+        color.a = 1f;
         var key = new PreviewKey(source.GetInstanceID(), color, width, height);
         if (PreviewCache.TryGetValue(key, out var cachedPreview) &&
             cachedPreview != null)
@@ -625,7 +677,7 @@ internal sealed class AudioEditor : UnityEditor.Editor
                     tint.r,
                     tint.g,
                     tint.b,
-                    (byte)((sourceAlpha * tint.a + 127) / 255));
+                    sourceAlpha);
             }
 
             result.SetPixels32(pixels);

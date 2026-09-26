@@ -2,20 +2,26 @@ using System;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Audio;
 using Emmanuel.AudioSystem;
 
 namespace Emmanuel.AudioSystem.Editor
 {
 internal sealed class AudioIconColorPopup : PopupWindowContent
 {
+    private const string MixerGroupPropertyName = "mixerGroup";
     private const string IconColorPropertyName = "iconColor";
-    private const int ColumnCount = 6;
+    private const int CategoryColumnCount = 4;
+    private const int ColorColumnCount = 6;
     private const float Padding = 8f;
-    private const float CellSize = 24f;
+    private const float CategoryCellWidth = 68f;
+    private const float CategoryCellHeight = 52f;
+    private const float ColorCellSize = 24f;
     private const float CellSpacing = 3f;
     private const float LabelHeight = 18f;
     private const float CustomFieldHeight = 20f;
-    private const float PopupWidth = 210f;
+    private const float DividerHeight = 1f;
+    private const float PopupWidth = 300f;
 
     private static readonly Color32[] PresetColors =
     {
@@ -41,7 +47,10 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
 
     private readonly UnityEngine.Object[] targets;
     private readonly Action repaintInspector;
+    private readonly AudioSystemSettings settings;
     private SerializedObject serializedTargets;
+    private GUIStyle categoryButtonStyle;
+    private GUIStyle categoryLabelStyle;
     private GUIStyle presetButtonStyle;
 
     public AudioIconColorPopup(
@@ -52,23 +61,30 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
             .Where(target => target != null)
             .ToArray();
         this.repaintInspector = repaintInspector;
+        settings = AudioSystemSettingsProvider.FindSettings();
     }
 
     public override Vector2 GetWindowSize()
     {
-        var gridWidth =
-            (ColumnCount * CellSize) +
-            ((ColumnCount - 1) * CellSpacing);
-        var rowCount = Mathf.CeilToInt(
-            PresetColors.Length / (float)ColumnCount);
-        var gridHeight =
-            (rowCount * CellSize) +
-            ((rowCount - 1) * CellSpacing);
+        var categoryCount = 1 + (settings?.Categories.Count ?? 0);
+        var categoryRowCount = Mathf.Max(
+            1,
+            Mathf.CeilToInt(categoryCount / (float)CategoryColumnCount));
+        var categoryGridHeight =
+            (categoryRowCount * CategoryCellHeight) +
+            ((categoryRowCount - 1) * CellSpacing);
+        var colorRowCount = Mathf.CeilToInt(
+            PresetColors.Length / (float)ColorColumnCount);
+        var colorGridHeight =
+            (colorRowCount * ColorCellSize) +
+            ((colorRowCount - 1) * CellSpacing);
+        var height =
+            Padding + LabelHeight + categoryGridHeight +
+            Padding + DividerHeight + Padding +
+            LabelHeight + colorGridHeight +
+            Padding + CustomFieldHeight + Padding;
 
-        return new Vector2(
-            Mathf.Max(PopupWidth, gridWidth + (Padding * 2f)),
-            Padding + LabelHeight + gridHeight + Padding +
-            CustomFieldHeight + Padding);
+        return new Vector2(PopupWidth, height);
     }
 
     public override void OnOpen()
@@ -85,59 +101,212 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
         EnsureStyles();
 
         serializedTargets.UpdateIfRequiredOrScript();
+        var mixerGroupProperty = serializedTargets.FindProperty(
+            MixerGroupPropertyName);
         var colorProperty = serializedTargets.FindProperty(
             IconColorPropertyName);
-        if (colorProperty == null)
+        if (mixerGroupProperty == null || colorProperty == null)
             return;
 
         var contentWidth = rect.width - (Padding * 2f);
-        var labelPosition = new Rect(
-            Padding,
-            Padding,
-            contentWidth,
-            LabelHeight);
+        var currentY = Padding;
+
         EditorGUI.LabelField(
-            labelPosition,
-            "Preset Colors",
-            EditorStyles.miniLabel);
+            new Rect(Padding, currentY, contentWidth, LabelHeight),
+            new GUIContent(
+                "Category & Output",
+                "Selects the category and changes the AudioMixerGroup used " +
+                "when this Audio is played."),
+            EditorStyles.boldLabel);
+        currentY += LabelHeight;
 
-        var gridTop = labelPosition.yMax;
-        DrawPresets(colorProperty, rect.width, gridTop);
+        var categoryGridHeight = DrawCategoryOptions(
+            mixerGroupProperty,
+            rect.width,
+            currentY);
+        currentY += categoryGridHeight + Padding;
 
-        var rowCount = Mathf.CeilToInt(
-            PresetColors.Length / (float)ColumnCount);
-        var gridHeight =
-            (rowCount * CellSize) +
-            ((rowCount - 1) * CellSpacing);
-        var customPosition = new Rect(
-            Padding,
-            gridTop + gridHeight + Padding,
-            contentWidth,
-            CustomFieldHeight);
+        EditorGUI.DrawRect(
+            new Rect(Padding, currentY, contentWidth, DividerHeight),
+            EditorGUIUtility.isProSkin
+                ? new Color(0f, 0f, 0f, 0.45f)
+                : new Color(0f, 0f, 0f, 0.2f));
+        currentY += DividerHeight + Padding;
 
-        DrawCustomColorField(customPosition, colorProperty);
+        EditorGUI.LabelField(
+            new Rect(Padding, currentY, contentWidth, LabelHeight),
+            new GUIContent(
+                "Icon Color",
+                "Changes only the Editor appearance and does not affect " +
+                "audio routing."),
+            EditorStyles.boldLabel);
+        currentY += LabelHeight;
+
+        var colorGridHeight = DrawPresets(
+            colorProperty,
+            rect.width,
+            currentY);
+        currentY += colorGridHeight + Padding;
+
+        DrawCustomColorField(
+            new Rect(
+                Padding,
+                currentY,
+                contentWidth,
+                CustomFieldHeight),
+            colorProperty);
     }
 
-    private void DrawPresets(
+    private float DrawCategoryOptions(
+        SerializedProperty mixerGroupProperty,
+        float availableWidth,
+        float gridTop)
+    {
+        var categoryCount = 1 + (settings?.Categories.Count ?? 0);
+        var rowCount = Mathf.Max(
+            1,
+            Mathf.CeilToInt(categoryCount / (float)CategoryColumnCount));
+        var gridWidth =
+            (CategoryColumnCount * CategoryCellWidth) +
+            ((CategoryColumnCount - 1) * CellSpacing);
+        var gridLeft = Mathf.Round((availableWidth - gridWidth) * 0.5f);
+
+        DrawCategoryOption(
+            mixerGroupProperty,
+            0,
+            gridLeft,
+            gridTop,
+            "Main / Root",
+            null,
+            settings != null ? settings.DefaultIcon : null,
+            true);
+
+        if (settings != null)
+        {
+            for (var index = 0; index < settings.Categories.Count; index++)
+            {
+                var category = settings.Categories[index];
+                var categoryName = string.IsNullOrWhiteSpace(category.Name)
+                    ? "Unnamed"
+                    : category.Name;
+                DrawCategoryOption(
+                    mixerGroupProperty,
+                    index + 1,
+                    gridLeft,
+                    gridTop,
+                    categoryName,
+                    category.MixerGroup,
+                    category.Icon != null
+                        ? category.Icon
+                        : settings.DefaultIcon,
+                    category.MixerGroup != null);
+            }
+        }
+
+        return
+            (rowCount * CategoryCellHeight) +
+            ((rowCount - 1) * CellSpacing);
+    }
+
+    private void DrawCategoryOption(
+        SerializedProperty mixerGroupProperty,
+        int index,
+        float gridLeft,
+        float gridTop,
+        string label,
+        AudioMixerGroup mixerGroup,
+        Texture2D icon,
+        bool enabled)
+    {
+        var column = index % CategoryColumnCount;
+        var row = index / CategoryColumnCount;
+        var position = new Rect(
+            gridLeft + (column * (CategoryCellWidth + CellSpacing)),
+            gridTop + (row * (CategoryCellHeight + CellSpacing)),
+            CategoryCellWidth,
+            CategoryCellHeight);
+        var selected = enabled &&
+            !mixerGroupProperty.hasMultipleDifferentValues &&
+            mixerGroupProperty.objectReferenceValue == mixerGroup;
+        var tooltip = GetCategoryTooltip(label, mixerGroup, enabled);
+        var previousEnabled = GUI.enabled;
+        GUI.enabled = enabled;
+
+        if (GUI.Button(
+                position,
+                new GUIContent(string.Empty, tooltip),
+                categoryButtonStyle))
+        {
+            ApplyMixerGroup(mixerGroupProperty, mixerGroup);
+        }
+
+        if (Event.current.type == EventType.Repaint)
+        {
+            var iconPosition = new Rect(
+                Mathf.Round(position.center.x - 14f),
+                position.y + 4f,
+                28f,
+                28f);
+            if (icon != null)
+            {
+                GUI.DrawTexture(
+                    iconPosition,
+                    icon,
+                    ScaleMode.ScaleToFit,
+                    true);
+            }
+
+            GUI.Label(
+                new Rect(
+                    position.x + 2f,
+                    position.yMax - 18f,
+                    position.width - 4f,
+                    16f),
+                label,
+                categoryLabelStyle);
+        }
+
+        GUI.enabled = previousEnabled;
+
+        if (selected)
+            DrawSelectionBorder(position);
+    }
+
+    private static string GetCategoryTooltip(
+        string label,
+        AudioMixerGroup mixerGroup,
+        bool enabled)
+    {
+        if (!enabled)
+            return $"{label}\nNo AudioMixerGroup is assigned in Audio System settings.";
+
+        if (mixerGroup == null)
+            return "Main / Root\nRoutes playback to the root of the Main AudioMixer.";
+
+        return $"{label}\nRoutes playback to " +
+               $"{mixerGroup.audioMixer.name}/{mixerGroup.name}.";
+    }
+
+    private float DrawPresets(
         SerializedProperty colorProperty,
         float availableWidth,
         float gridTop)
     {
         var gridWidth =
-            (ColumnCount * CellSize) +
-            ((ColumnCount - 1) * CellSpacing);
+            (ColorColumnCount * ColorCellSize) +
+            ((ColorColumnCount - 1) * CellSpacing);
         var gridLeft = Mathf.Round(
             (availableWidth - gridWidth) * 0.5f);
 
         for (var index = 0; index < PresetColors.Length; index++)
         {
-            var column = index % ColumnCount;
-            var row = index / ColumnCount;
+            var column = index % ColorColumnCount;
+            var row = index / ColorColumnCount;
             var cellPosition = new Rect(
-                gridLeft + (column * (CellSize + CellSpacing)),
-                gridTop + (row * (CellSize + CellSpacing)),
-                CellSize,
-                CellSize);
+                gridLeft + (column * (ColorCellSize + CellSpacing)),
+                gridTop + (row * (ColorCellSize + CellSpacing)),
+                ColorCellSize,
+                ColorCellSize);
             var preset = (Color)PresetColors[index];
             var selected =
                 !colorProperty.hasMultipleDifferentValues &&
@@ -151,8 +320,6 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
                     presetButtonStyle))
             {
                 ApplyColor(colorProperty, preset);
-                editorWindow.Close();
-                GUIUtility.ExitGUI();
             }
 
             DrawPresetColor(cellPosition, preset);
@@ -160,6 +327,12 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
             if (selected)
                 DrawSelectionBorder(cellPosition);
         }
+
+        var rowCount = Mathf.CeilToInt(
+            PresetColors.Length / (float)ColorColumnCount);
+        return
+            (rowCount * ColorCellSize) +
+            ((rowCount - 1) * CellSpacing);
     }
 
     private void EnsureStyles()
@@ -167,6 +340,22 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
         if (presetButtonStyle != null)
             return;
 
+        categoryButtonStyle = new GUIStyle(EditorStyles.miniButton)
+        {
+            fixedWidth = 0f,
+            fixedHeight = 0f,
+            stretchWidth = true,
+            stretchHeight = true,
+            padding = new RectOffset(),
+            margin = new RectOffset(),
+            overflow = new RectOffset(),
+            contentOffset = Vector2.zero
+        };
+        categoryLabelStyle = new GUIStyle(EditorStyles.miniLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            clipping = TextClipping.Clip
+        };
         presetButtonStyle = new GUIStyle(EditorStyles.miniButton)
         {
             fixedWidth = 0f,
@@ -234,7 +423,7 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
             GUIContent.none,
             colorProperty.colorValue,
             true,
-            true,
+            false,
             false);
         if (EditorGUI.EndChangeCheck())
             ApplyColor(colorProperty, customColor);
@@ -242,11 +431,25 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
         EditorGUI.showMixedValue = previousMixedValue;
     }
 
+    private void ApplyMixerGroup(
+        SerializedProperty mixerGroupProperty,
+        AudioMixerGroup mixerGroup)
+    {
+        mixerGroupProperty.objectReferenceValue = mixerGroup;
+        ApplyChanges();
+    }
+
     private void ApplyColor(
         SerializedProperty colorProperty,
         Color color)
     {
+        color.a = 1f;
         colorProperty.colorValue = color;
+        ApplyChanges();
+    }
+
+    private void ApplyChanges()
+    {
         serializedTargets.ApplyModifiedProperties();
         EditorApplication.RepaintProjectWindow();
         repaintInspector?.Invoke();
@@ -255,7 +458,11 @@ internal sealed class AudioIconColorPopup : PopupWindowContent
 
     private static bool ColorsMatch(Color left, Color right)
     {
-        return ((Color32)left).Equals((Color32)right);
+        var left32 = (Color32)left;
+        var right32 = (Color32)right;
+        return left32.r == right32.r &&
+               left32.g == right32.g &&
+               left32.b == right32.b;
     }
 
     private static void DrawSelectionBorder(Rect position)

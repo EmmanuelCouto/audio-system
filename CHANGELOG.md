@@ -2,6 +2,12 @@
 
 All notable changes to this package are documented in this file.
 
+## [1.1.0] - 2026-09-26
+
+- Expanded the Audio header popup with category and output selection while
+  keeping icon color clearly identified as an Editor-only visual setting.
+- Changed Icon Color to RGB-only so asset icons cannot become transparent.
+
 ## [1.0.1] - 2026-09-25
 
 - Fixed the default Main AudioMixer remaining read-only inside the package.
